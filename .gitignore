@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Machine Learning artifacts / Checkpoints
+logs_tpm/
+models_tpm/
+*.zip
+*.pkl
+
+# Generated data outputs
+*.csv
+report_train_QKD.json
+
+# IDEs
+.vscode/
+.idea/
