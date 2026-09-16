@@ -15,3 +15,12 @@ report_train_QKD.json
 # IDEs
 .vscode/
 .idea/
+
+# Log di addestramento e risultati di test
+logs_tpm/
+test_results_tpm.csv
+*.npz
+*.csv
+
+# Modelli salvati (opzionale, traccia solo le release finali)
+models_tpm/

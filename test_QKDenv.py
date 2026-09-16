@@ -22,19 +22,20 @@ def test_agent(distances_test, n_sessions):
         #observation, info=env.reset()
         #env.unwrapped.engine.L=d #sets the distance for the test SUPER WRONG UNWRAPPING
         #env.set_distance(d)
-        observation, info=env.reset(options={'distance': d})
-        observation[0]=d
         
         for i in range(n_sessions):
+            observation, info=env.reset(options={'distance': d})
+            
             for step_idx in range(20): #20 steps per session, then reset, since n_max steps=20 di là
                 ti=time.time()
                 action=model.predict(observation, deterministic=True)[0] #determ=True to say NOT TO GO EXPLORING, just use agent's policy
-                observation, reward, terminated, truncated, info=env.step(action)
+                next_observation, reward, terminated, truncated, info=env.step(action)
                 tf=time.time()
                 t=tf-ti
                 riga={
                     'distance': d,
                     'session': i, 
+                    'step': step_idx,
                     'bias': env.engine.bias, #bias chosen by the agent
                     'reward': reward, #reward obtained from the session
                     'qber': info['qber'], #qber obtained from the session
@@ -44,6 +45,7 @@ def test_agent(distances_test, n_sessions):
                     'time': t #time taken for the step
                 }
                 reslts.append(riga)
+                observation=next_observation
                 if terminated or truncated:
                     #observation, info=env.reset() #reset the env for the next session
                     break #go to the next session

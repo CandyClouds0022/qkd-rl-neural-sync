@@ -44,16 +44,21 @@ class QKDEnv(gym.Env):
         self.tpm_A= tpm(K=3, N=4, L=6, M=3, B=2) #reset the TPM for Alice
         self.tpm_B= tpm(K=3, N=4, L=6, M=3, B=2) #reset the TPM for Bob
         if options is not None and isinstance(options, dict) and 'distance' in options:
-            new_L=options['distance']
+                    new_L=float(options['distance'])
         else:
-            new_L=np.random.uniform(0, 100)
+            #new_L=np.random.uniform(0, 100) #OLD version
+            if hasattr(self, 'current_L'):
+                step_choice=np.random.choice([-10.0, 0.0, 10.0]) #discrete grid choices: -10, stayssame, +10
+                new_L=float(np.clip(self.current_L + step_choice, 0.0, 150.0))
+            else:
+                new_L=10 #absolute first choice for first sim
         self.engine.L=new_L
         #RICALCOLO perdita chloss basata sulla nuova L
         if hasattr(self.engine, 'alpha'):
             self.engine.chloss=1-10**((-new_L*self.engine.alpha)/10)
         else:
             self.engine.chloss=1-10**((-new_L*0.2)/10)
-        observation=np.array([new_L, 0.0, 0.0], dtype=np.float32) #random distance, qber and gain are 0 AS at the beginning
+        observation=np.array([new_L/150.0, 0.0, 0.0], dtype=np.float32) #random distance, qber and gain are 0 AS at the beginning
         info={} #requested from gymnasium, empty currently 
         return observation, info
 
@@ -71,6 +76,7 @@ class QKDEnv(gym.Env):
         A_final, B_final=A_sifted, B_sifted
         final_key_lenght=0 #ADDED NEWWWW
         key_lenght_pre_privamp=key_lenght #ADDED NEWWWW
+        leaked_fraction=0.0 #setting this as default value if qber >= 0.11
         if qber<0.11 and key_lenght>0: #if qber is too high, we don't even try to reconcile
             A_reconciled, B_reconciled, final_key_len=self.engine.reconciliation(A_sifted, B_sifted, qber)
             key_lenght_pre_privamp=final_key_len #dopo la riconciliazione (leakage per error correction) ma prima della privacy amplification
@@ -111,18 +117,30 @@ class QKDEnv(gym.Env):
         hamming_ratio=float(diff_weights/total_weights)
         qber=hamming_ratio #mapping qber perceived by agent
         SECURITY_PENALTY_WEIGHT=8.0 #=> stick
+        # evaluation of reward MUST be based on DISTANCE (agents choices does not entirely depend on his policy, but channel as well)
+        distance_block = np.floor(self.engine.L / 10.0)  #like 0, 1, 2... 9
+        distance_weight = np.exp(-0.2 * distance_block) #equally spaced distances weights from 1.0 to 0.1
         if sync_success==1:
             gain=1.0
             #NOTEforUser: the synch bonus gets eaten by security penality (speeding up with extreme bias that gives away half of the key should be OPPOSED by agent)
-            reward=20.0-(SECURITY_PENALTY_WEIGHT*leaked_fraction)
+            speed_bonus=(self.max_steps-self.current_step)*0.5 #to encourage faster syncs (less sessions)
+            reward=(10.0 + speed_bonus)/(distance_weight + 1e-5)-(SECURITY_PENALTY_WEIGHT * leaked_fraction)
+            terminated=True #IMPORTABT: terminating episode immediately if sync
+        elif final_key_lenght==0: #failure penalty decreases with distance increasing
+            gain=0.0 
+            reward=-2.0*distance_weight  # @ 10 km = -1.6, or @ 90 km = -0.3
+            terminated=False
         else:
             gain=0.0 
-            #carrotting progressively if Hamm distance is DIMINISHED
-            reward=-10.0*hamming_ratio+(final_key_lenght/4000.0)-SECURITY_PENALTY_WEIGHT*leaked_fraction
+            # carrotting progressively if Hamm distance is DIMINISHED
+            reward=(-5.0*hamming_ratio+(final_key_lenght/5000.0)-SECURITY_PENALTY_WEIGHT*leaked_fraction)*distance_weight
+            terminated=False
 
         # if o bits were extracted (channel with too destructive asymmetric bias or smthg)
         if final_key_lenght==0:
-            reward=-5.0  #IDLING penalty
+            reward=-2.0  #IDLING penalty reduced slightly
+
+        reward=float(np.clip(reward, -10.0, 15.0)) #used to stabilize PPO gradient updates :)
 
         #gain=key_lenght/self.engine.bts
         #update the observation: what we get
@@ -154,7 +172,7 @@ class QKDEnv(gym.Env):
         observation=np.array([self.engine.L, qber, gain], dtype=np.float32)
         
         terminated=False
-        truncated=self.current_step>=20
+        truncated=self.current_step>=self.max_steps
         
         info={
             'qber': qber,
