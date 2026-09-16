@@ -5,6 +5,8 @@ __pycache__/
 # Machine Learning artifacts / Checkpoints
 logs_tpm/
 models_tpm/
+test_results_tpm.csv
+*.npz
 *.zip
 *.pkl
 
@@ -16,11 +18,8 @@ report_train_QKD.json
 .vscode/
 .idea/
 
-# Log di addestramento e risultati di test
-logs_tpm/
-test_results_tpm.csv
-*.npz
-*.csv
-
-# Modelli salvati (opzionale, traccia solo le release finali)
+# Saved models (only last outputs traced)
 models_tpm/
+
+# Any plot file
+plot_*.py

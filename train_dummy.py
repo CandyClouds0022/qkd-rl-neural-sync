@@ -27,6 +27,7 @@ import time
 #OLD version: BT locals
 base_dir=os.path.dirname(os.path.abspath(__file__))
 output_dir=os.path.join(base_dir, "dummy_model_tpm")
+os.makedirs(output_dir, exist_ok=True) #creating folder if not existing already
 input_csv_path=os.path.join(output_dir, "dataset_dummy_fortraintest.csv") 
 df=pd.read_csv(input_csv_path)
 

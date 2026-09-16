@@ -173,7 +173,7 @@ class QKDEngine:
         # file_name="dataset_dummy_fortraintest.csv"
         # full_path=os.path.join(out_dir, file_name)
         current_script_dir=os.path.dirname(os.path.abspath(__file__))
-        out_dir=os.path.join(current_script_dir, "dummy_model") #creation of folder dummy model
+        out_dir=os.path.join(current_script_dir, "dummy_model_tpm") #creation of folder dummy model
         file_name="dataset_dummy_fortraintest.csv"
         full_path=os.path.join(out_dir, file_name)
         if not os.path.exists(out_dir): #in case folder does not exist allready
@@ -219,3 +219,7 @@ class QKDEngine:
         print(f"Dataset saved successfully in: {full_path}")
         print(f"Total rows: {len(finale_df)}")
         return finale_df
+
+if __name__ == "__main__":
+    engine = QKDEngine(bits=10000, bias=0.5, L=0, bit_flip=0.01, p_eve=0.05)
+    engine.generate_static_dataset(n_samples_per_distance=100)
