@@ -46,7 +46,7 @@ To carry out the thesis experiments, files are required to be executed in the fo
 
 ### 1. Generate the static dataset and train the benchmark MLP model:
 ```bash
-#python physicalengine.py
+python physicalengine.py
 python train_dummy.py
 ```
 
