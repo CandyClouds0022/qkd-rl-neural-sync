@@ -30,7 +30,7 @@ class QKDEnv(gym.Env):
         self.tpm_A=tpm(K=3, N=4, L=6, M=3, B=2) #initialize the TPM for Alice
         self.tpm_B=tpm(K=3, N=4, L=6, M=3, B=2) #initialize the TPM for Bob
         #Action space:
-        self.action_space=spaces.Box(low=0.1, high=0.9, shape=(1,)) #cfr: np.random.rand() for the ia to comfortably pick a bias in the range 0.1-0.9
+        self.action_space=spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32) #cfr: np.random.rand() for the ia to comfortably pick a bias in the range 0.1-0.9
         #Observation space:
         self.observation_space=spaces.Box(low=np.array([0.0,0.0,0.0], dtype=np.float32), high=np.array([1.0, 1.0, 1.0], dtype=np.float32), dtype=np.float32) #L=distance, qber=quantum bit error rate, gain=ratio of sifted key to initial bits NORMALIZED to be fed to the agent
         #physicial engine init from QKDAdvancedblabla
@@ -66,13 +66,13 @@ class QKDEnv(gym.Env):
 
     def step(self, action):
         self.current_step+=1 #saving this for later
-        bias=float(np.squeeze(action)) #about bias=action[0], to get the bias from action
+        bias=0.1+((0.9-0.1)*float(np.array(action).flat[0])) #circa bias=action[0], to get the bias from action
         self.engine.bias=bias #update the bias in the ACTUAL engine
         # running the physicsss
         A_bits, A_bases = self.engine.generate_Alice()
-        survived_bases, survived_bits, whistledown_mask = self.engine.channel_simulation(A_bases, A_bits)
-        B_bases, B_bits = self.engine.generate_Bob(survived_bases, survived_bits)
-        A_sifted, B_sifted, sifted_whistledown = self.engine.sifting(survived_bases, B_bases, survived_bits, B_bits, whistledown_mask)
+        survived_bases, alice_true_bits, bob_received_bits, whistledown_mask = self.engine.channel_simulation(A_bases, A_bits)
+        B_bases, B_bits = self.engine.generate_Bob(survived_bases, bob_received_bits)
+        A_sifted, B_sifted, sifted_whistledown = self.engine.sifting(survived_bases, B_bases, alice_true_bits, B_bits, whistledown_mask)
         raw_qber, key_lenght=self.engine.calculate_metrics(A_sifted, B_sifted)
         # ERROR RECONCILIATION anfd ...:
         A_final, B_final=A_sifted, B_sifted
@@ -119,7 +119,7 @@ class QKDEnv(gym.Env):
         hamming_ratio=float(diff_weights/total_weights)
         qber=hamming_ratio #mapping qber perceived by agent
         SECURITY_PENALTY_WEIGHT=8.0 #=> stick
-        real_gain=float(final_key_len/self.engine.bits)
+        real_gain=float(final_key_len/self.engine.bts)
         # evaluation of reward MUST be based on DISTANCE (agents choices does not entirely depend on his policy, but channel as well)
         distance_block = np.floor(self.engine.L / 10.0)  #like 0, 1, 2... 9
         distance_weight = np.exp(-0.2 * distance_block) #equally spaced distances weights from 1.0 to 0.1
@@ -127,7 +127,7 @@ class QKDEnv(gym.Env):
             #gain=1.0
             #NOTEforUser: the synch bonus gets eaten by security penality (speeding up with extreme bias that gives away half of the key should be OPPOSED by agent)
             speed_bonus=(self.max_steps-self.current_step)*0.5 #to encourage faster syncs (less sessions)
-            reward=(10.0 + speed_bonus)/(distance_weight + 1e-5)-(SECURITY_PENALTY_WEIGHT * leaked_fraction)
+            reward=(10.0+speed_bonus)*distance_weight-(SECURITY_PENALTY_WEIGHT*leaked_fraction)
             terminated=True #IMPORTABT: terminating episode immediately if sync
         elif final_key_len==0: #failure penalty decreases with distance increasing
             #gain=0.0 
@@ -181,7 +181,7 @@ class QKDEnv(gym.Env):
             'raw_qber': raw_qber,
             'gain': real_gain,
             'key_length': final_key_len,
-            'hamming_ratio': hamming_ratio,
+            'hamming_ratio': qber,
             'tpm_synced': sync_success,
             'leaked_fraction': leaked_fraction
         }

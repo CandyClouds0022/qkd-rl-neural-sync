@@ -50,7 +50,7 @@ class QKDEngineAdvanced(QKDEngine):
         """
         Abits=Abits.astype(float) #to allow NaN values for the lost bits, which will be handled in the sifting phase
         N=int(self.bts)
-        survived_mask=np.zeros(N) #0=dead, 1=survived
+        #survived_mask=np.zeros(N) #0=dead, 1=survived
 
         # channel losses new:
         rand_mask=np.random.rand(N)
@@ -58,14 +58,15 @@ class QKDEngineAdvanced(QKDEngine):
         T=10**(-self.alpha * self.L/10) #new loss probability based on actual, real fiber components: computes the Transmittance
         #survived_mask[rand_mask<T]=1
         survived_mask=rand_mask<T #boolean mask: True if survives, False if lost
-        survived_A_bits=np.where(survived_mask==1, Abits, np.nan)
-        survived_crypted_bases=np.where(survived_mask==1, crypted_bases, np.nan)
+        alice_true_bits=np.where(survived_mask, Abits, np.nan) #true alice bits, touched only by noise
+        survived_crypted_bases=np.where(survived_mask, crypted_bases, np.nan)
+        bob_received_bits = np.copy(alice_true_bits) #@the moment, Bob's to receive alice bits easy
 
         # smarter Eve: only attacking where ther's a photon (@survivedmask==true):
         eve_attack_roll=np.random.random(N)
-        attacked_mask=(survived_mask) & (eve_attack_roll<self.p_eve)
+        attacked_mask=survived_mask&(eve_attack_roll<self.p_eve)
         mpmask=np.random.random(N)<self.p_multiphoton #multiphoton mask
-        whistledown_mask=(attacked_mask)&(mpmask) #amongst the attacked mask bools take the ones thatr multiphoton
+        whistledown_mask=attacked_mask&mpmask #amongst the attacked mask bools take the ones thatr multiphoton
         eve_leak_mask=np.copy(whistledown_mask) #to keep track of the bits that eve got
         for i in range(N):
             if whistledown_mask[i]: #Eve attacks a multiphoton pulse
@@ -80,27 +81,27 @@ class QKDEngineAdvanced(QKDEngine):
                     #no more pass just because no errors were introduced
                     eve_leak_mask[i]=True #E non ha introdotto errore (but got the bit)
                 else: #Eve chooses the wrong base
-                    survived_A_bits[i]=np.random.randint(0,2) #introduces an error with 50% probability
+                    bob_received_bits[i]=np.random.randint(0,2) #introduces an error with 50% probability, ONLY @Bob's side
         
-        # AWGN (follow-up of the bit flip, more realistic for channels, theoretically)
+        # AWGN (follow-up of the bit flip, more realistic for channels, theoretically) ONLY@Bob's side
         #to make them feasible => need to turn the bits into actual e-signals (bits 0:+1, bits 1:-1)
-        masky=~np.isnan(survived_A_bits) #booleans to hit where there are no NaNs == mask to apply noise only to the survived bits
-        Asignal=np.where(masky, 1-2*survived_A_bits, 0) #turn bits into signals: 0->+1, 1->-1, and 0 for the dead bits
-        Anoise=np.random.normal(0, self.sigma, N)
-        noisy_Asignal=Asignal+Anoise
-        survived_A_bits=np.where(masky, np.where(noisy_Asignal > 0, 0, 1), np.nan) #converting back to bits, after noise, Bob's pov
+        masky=~np.isnan(bob_received_bits) #booleans to hit where there are no NaNs == mask to apply noise only to the survived bits
+        Bsignal=np.where(masky, 1-2*bob_received_bits, 0) #turn bits into signals: 0->+1, 1->-1, and 0 for the dead bits
+        Bnoise=np.random.normal(0, self.sigma, N)
+        noisy_Bsignal=Bsignal+Bnoise
+        bob_received_bits=np.where(masky, np.where(noisy_Bsignal > 0, 0, 1), np.nan) #converting back to bits, after noise, Bob's pov
         #reminder: in reality when we have huge lines (L) and a noisy channel, the real signal drowns in noise (fun thing, huh? PROVA)
         
         # Dark Counts (only for Bob):
         # logic behind: "dead=np.where(survived_A_bits==np.nan, 1, 0)" for def NaN
-        dead=np.isnan(survived_A_bits)
+        dead=np.isnan(bob_received_bits)
         dark_trigger=dead & (np.random.rand(N) < self.p_dark) # p_dark deve essere tipo 1e-5
-        survived_A_bits[dark_trigger]=np.random.randint(0, 2, np.sum(dark_trigger))
+        bob_received_bits[dark_trigger]=np.random.randint(0, 2, np.sum(dark_trigger))
 
-        return survived_crypted_bases, survived_A_bits, eve_leak_mask #returning the mask of the 
+        return survived_crypted_bases, alice_true_bits, bob_received_bits, eve_leak_mask #returning the mask of the 
             #multiphoton pulses that Eve attacked, for later use in the sifting phase
     
-    def generate_Bob(self, survived_crypted_bases, survived_A_bits):
+    def generate_Bob(self, survived_crypted_bases, bob_received_bits):
         """
         Bob's generation of bases and bits (accounting for the bias), accounting for dark counts,
         receiving in input the survived bases and bits from the channel simulation.
@@ -109,12 +110,12 @@ class QKDEngineAdvanced(QKDEngine):
         - B_bits: the bits generated by Bob, with his guesses.
         """
         Bob_bases = np.where(np.random.random(self.bts) < self.bias, 0, 1)
-        B_bits=np.copy(survived_A_bits) #Bob counts the bits gotten out of the channel
-        B_guesses_mask=(survived_crypted_bases != Bob_bases)&(~np.isnan(survived_A_bits)) #Bob guesses the bits where his bases mismatch with Alice's, but only for the survived bits
+        B_bits=np.copy(bob_received_bits) #Bob counts the bits gotten out of the channel
+        B_guesses_mask=(survived_crypted_bases != Bob_bases)&(~np.isnan(bob_received_bits)) #Bob guesses the bits where his bases mismatch with Alice's, but only for the survived bits
         B_bits[B_guesses_mask]=np.random.randint(0,2, np.sum(B_guesses_mask)) #Bob guesses the bits where his bases mismatch with Alice's, but only for the survived bits
         return Bob_bases, B_bits
     
-    def sifting(self, survived_crypted_bases, B_bases, survived_A_bits, B_bits, whistledown_mask):
+    def sifting(self, survived_crypted_bases, B_bases, alice_true_bits, B_bits, whistledown_mask):
         """
         This advanced version of sifting discards if bases are different, OR if photon is lost
         (bit is NaN). Consider the MULTIPHOTON case (E uses her BS).
@@ -123,8 +124,8 @@ class QKDEngineAdvanced(QKDEngine):
         - Bsifted: the sifted bits for Bob;
         - sifted_whistledown: the mask for the sifted multiphoton bits.
         """
-        match_mask=(survived_crypted_bases==B_bases) & (~np.isnan(B_bits)) #& without_multiphoton_mask
-        Asifted=survived_A_bits[match_mask]
+        match_mask=(survived_crypted_bases==B_bases) & (~np.isnan(alice_true_bits)) #& without_multiphoton_mask
+        Asifted=alice_true_bits[match_mask]
         Bsifted=B_bits[match_mask]
         sifted_whistledown=whistledown_mask[match_mask]  #mask for multiphoton bits that actually survived
         return Asifted, Bsifted, sifted_whistledown
@@ -174,7 +175,7 @@ class QKDEngineAdvanced(QKDEngine):
             #so that, moral of the story:
             final_key_lenght=max(0, (len(Asifted)-leakage))
             A_final=Asifted[:final_key_lenght]
-            B_final=Bsifted[:final_key_lenght]
+            B_final=Bsifted_reconciled[:final_key_lenght]
             return A_final, B_final, final_key_lenght
         else:
             return Asifted, Bsifted, len(Asifted) #highly unlikely to happen..
