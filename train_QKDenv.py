@@ -64,7 +64,7 @@ def train_agent(total_tmstpd):
     #OLD version: before tpm (useful for names of old graphs)
     #env=Monitor(env, 'C:/Users/rorag/VS_Cpp/thesis proj/logs/')  #wrap of the environment, to be passed to the model as a monitored object
     env=Monitor(env, logs_dir)
-    model=PPO('MlpPolicy', env, verbose=1, learning_rate=0.0003, n_steps=2048, batch_size=64, ent_coef=0.01)#, n_epochs=10)
+    model=PPO('MlpPolicy', env, verbose=1, learning_rate=0.0003, n_steps=2048, batch_size=64, ent_coef=0.05)
     #learning_rate of PPO to see how fast the agent learns
     #n_steps the number of steps to run for each environment before the agent updates the NN
     #batch_size extent of the data pool to use for each update

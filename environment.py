@@ -32,7 +32,7 @@ class QKDEnv(gym.Env):
         #Action space:
         self.action_space=spaces.Box(low=0.1, high=0.9, shape=(1,)) #cfr: np.random.rand() for the ia to comfortably pick a bias in the range 0.1-0.9
         #Observation space:
-        self.observation_space=spaces.Box(low=np.array([0,0,0]), high=np.array([100, 1, 1]), dtype=np.float32) #L=distance, qber=quantum bit error rate, gain=ratio of sifted key to initial bits
+        self.observation_space=spaces.Box(low=np.array([0.0,0.0,0.0], dtype=np.float32), high=np.array([1.0, 1.0, 1.0], dtype=np.float32), dtype=np.float32) #L=distance, qber=quantum bit error rate, gain=ratio of sifted key to initial bits NORMALIZED to be fed to the agent
         #physicial engine init from QKDAdvancedblabla
         self.engine=QKDEngineAdvanced(bits=10000, bias=0.5, bit_flip=0, p_eve=0.1, p_multiphoton=0.15, L=50, alpha=0.2, p_dark=1e-4, sigma=0.1)
         pass
@@ -53,39 +53,41 @@ class QKDEnv(gym.Env):
             else:
                 new_L=10 #absolute first choice for first sim
         self.engine.L=new_L
-        #RICALCOLO perdita chloss basata sulla nuova L
+        self.current_L=new_L
+        # RECOMPUTING chloss based on new L
         if hasattr(self.engine, 'alpha'):
             self.engine.chloss=1-10**((-new_L*self.engine.alpha)/10)
         else:
             self.engine.chloss=1-10**((-new_L*0.2)/10)
-        observation=np.array([new_L/150.0, 0.0, 0.0], dtype=np.float32) #random distance, qber and gain are 0 AS at the beginning
+        scaled_L=np.float32(new_L/150.0)
+        observation=np.array([scaled_L, 0.0, 0.0], dtype=np.float32) #random distance, qber and gain are 0 AS at the beginning
         info={} #requested from gymnasium, empty currently 
         return observation, info
 
     def step(self, action):
         self.current_step+=1 #saving this for later
-        bias=action[0] #get the bias from action
+        bias=float(np.squeeze(action)) #about bias=action[0], to get the bias from action
         self.engine.bias=bias #update the bias in the ACTUAL engine
         # running the physicsss
         A_bits, A_bases = self.engine.generate_Alice()
         survived_bases, survived_bits, whistledown_mask = self.engine.channel_simulation(A_bases, A_bits)
         B_bases, B_bits = self.engine.generate_Bob(survived_bases, survived_bits)
         A_sifted, B_sifted, sifted_whistledown = self.engine.sifting(survived_bases, B_bases, survived_bits, B_bits, whistledown_mask)
-        qber, key_lenght=self.engine.calculate_metrics(A_sifted, B_sifted)
+        raw_qber, key_lenght=self.engine.calculate_metrics(A_sifted, B_sifted)
         # ERROR RECONCILIATION anfd ...:
         A_final, B_final=A_sifted, B_sifted
-        final_key_lenght=0 #ADDED NEWWWW
-        key_lenght_pre_privamp=key_lenght #ADDED NEWWWW
+        final_key_len=0
+        key_lenght_pre_privamp=key_lenght
         leaked_fraction=0.0 #setting this as default value if qber >= 0.11
-        if qber<0.11 and key_lenght>0: #if qber is too high, we don't even try to reconcile
-            A_reconciled, B_reconciled, final_key_len=self.engine.reconciliation(A_sifted, B_sifted, qber)
-            key_lenght_pre_privamp=final_key_len #dopo la riconciliazione (leakage per error correction) ma prima della privacy amplification
+        if raw_qber<0.11 and key_lenght>0: #if qber is too high, we don't even try to reconcile
+            A_reconciled, B_reconciled, final_key_len=self.engine.reconciliation(A_sifted, B_sifted, raw_qber)
+            key_lenght_pre_privamp=final_key_len #after reconciliation (leakage per error correction) but before privacy amplification
             key_lenght=final_key_len #update the key length after reconciliation
-            A_final, B_final, final_key_lenght=self.engine.priv_ampl(A_reconciled, B_reconciled, final_key_len, sifted_whistledown)
-            key_lenght=final_key_lenght #update the key length after priv ampl
+            A_final, B_final, final_key_len=self.engine.priv_ampl(A_reconciled, B_reconciled, final_key_len, sifted_whistledown)
+            key_lenght=final_key_len #update the key length after priv ampl
             # ... PRIV amplification, covering fpr what Eve knows (leaked)
             if key_lenght_pre_privamp>0:
-                leaked_fraction=1.0-(final_key_lenght/key_lenght_pre_privamp)
+                leaked_fraction=1.0-(final_key_len/key_lenght_pre_privamp)
             else:
                 leaked_fraction=0.0
         # TPMs sync session core:
@@ -117,28 +119,29 @@ class QKDEnv(gym.Env):
         hamming_ratio=float(diff_weights/total_weights)
         qber=hamming_ratio #mapping qber perceived by agent
         SECURITY_PENALTY_WEIGHT=8.0 #=> stick
+        real_gain=float(final_key_len/self.engine.bits)
         # evaluation of reward MUST be based on DISTANCE (agents choices does not entirely depend on his policy, but channel as well)
         distance_block = np.floor(self.engine.L / 10.0)  #like 0, 1, 2... 9
         distance_weight = np.exp(-0.2 * distance_block) #equally spaced distances weights from 1.0 to 0.1
         if sync_success==1:
-            gain=1.0
+            #gain=1.0
             #NOTEforUser: the synch bonus gets eaten by security penality (speeding up with extreme bias that gives away half of the key should be OPPOSED by agent)
             speed_bonus=(self.max_steps-self.current_step)*0.5 #to encourage faster syncs (less sessions)
             reward=(10.0 + speed_bonus)/(distance_weight + 1e-5)-(SECURITY_PENALTY_WEIGHT * leaked_fraction)
             terminated=True #IMPORTABT: terminating episode immediately if sync
-        elif final_key_lenght==0: #failure penalty decreases with distance increasing
-            gain=0.0 
+        elif final_key_len==0: #failure penalty decreases with distance increasing
+            #gain=0.0 
             reward=-2.0*distance_weight  # @ 10 km = -1.6, or @ 90 km = -0.3
             terminated=False
         else:
-            gain=0.0 
+            #gain=0.0 
             # carrotting progressively if Hamm distance is DIMINISHED
-            reward=(-5.0*hamming_ratio+(final_key_lenght/5000.0)-SECURITY_PENALTY_WEIGHT*leaked_fraction)*distance_weight
+            reward=(-5.0*hamming_ratio+(final_key_len/5000.0)-SECURITY_PENALTY_WEIGHT*leaked_fraction)*distance_weight
             terminated=False
 
         # if o bits were extracted (channel with too destructive asymmetric bias or smthg)
-        if final_key_lenght==0:
-            reward=-2.0  #IDLING penalty reduced slightly
+        #if final_key_lenght==0:
+            #reward=-2.0  #IDLING penalty reduced slightly
 
         reward=float(np.clip(reward, -10.0, 15.0)) #used to stabilize PPO gradient updates :)
 
@@ -169,15 +172,16 @@ class QKDEnv(gym.Env):
         #    reward = -1.0 + (gain * 10.0) - (qber * 5.0) #new: shifted towards negative region (we'r supposedly guiding the agent)
                 #else:
                     #reward=-0.1-(qber-0.11) #penalize LESS heavily if qber is too high (insecure)
-        observation=np.array([self.engine.L, qber, gain], dtype=np.float32)
-        
-        terminated=False
+        scaled_L=np.float32(self.engine.L/150.0)
+        observation=np.array([scaled_L, np.float32(qber), np.float32(real_gain)], dtype=np.float32)
+
         truncated=self.current_step>=self.max_steps
         
         info={
-            'qber': qber,
-            'gain': gain,
-            'key_length': final_key_lenght,
+            'raw_qber': raw_qber,
+            'gain': real_gain,
+            'key_length': final_key_len,
+            'hamming_ratio': hamming_ratio,
             'tpm_synced': sync_success,
             'leaked_fraction': leaked_fraction
         }
