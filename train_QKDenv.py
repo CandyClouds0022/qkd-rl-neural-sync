@@ -11,8 +11,6 @@ again, but the agent can keep learning to choose the bias in a smarter way, base
 the previous experience).
 """
 
-from xml.parsers.expat import model
-
 import gymnasium as gym
 from stable_baselines3 import PPO #Proximal Policy Optimization, currently trending RL algoritmh
 from stable_baselines3.common.callbacks import CheckpointCallback #just a check to save the model @ regular intervals
@@ -35,9 +33,8 @@ class ActionDistributionLogger(BaseCallback):
         if self.n_calls % self.check_freq == 0:
             obs=self.locals.get("new_obs") #extracting the last observation without calling reset
             if obs is not None:
-                obs_tensor=self.model.policy.obs_to_tensor(obs)[0]
-            #(distribution non squashed: directly picking mean/std from policy)
-                dist=self.model.policy.get_distribution(self.model.policy.obs_to_tensor(obs)[0])
+                obs_tensor,_=self.model.policy.obs_to_tensor(obs) #returns a tuple already
+                dist=self.model.policy.get_distribution(obs_tensor) #(distribution not-squashed: directly picking mean/std from policy)
                 mean_raw=dist.distribution.mean.detach().cpu().numpy().flatten()
                 std_raw=dist.distribution.stddev.detach().cpu().numpy().flatten()
                 clipped=np.clip(mean_raw, self.model.action_space.low, self.model.action_space.high)
