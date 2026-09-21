@@ -16,13 +16,15 @@ from stable_baselines3 import PPO #Proximal Policy Optimization, currently trend
 from stable_baselines3.common.callbacks import CheckpointCallback #just a check to save the model @ regular intervals
 from stable_baselines3.common.monitor import Monitor #Monitor=class used to log the training progress
 from stable_baselines3.common.callbacks import EvalCallback #to avoid trusting just the logs during the learning process 
-from stable_baselines3.common.callbacks import BaseCallback #(blocco 4) serve per la callback diagnostica qui sotto
+from stable_baselines3.common.callbacks import BaseCallback #callback diagnostic
 import numpy as np
 from environment import QKDEnv
 import json
 import time
 import os
 from datetime import datetime
+import torch as th
+import torch.nn as nn #NOTEforUser: unlock this iff needed to decenter the gaussian distribution from 0, to pick values in the 0.1-0.9 int starting from center 0.5 :)
 
 class ActionDistributionLogger(BaseCallback):
     def __init__(self, check_freq=1000, verbose=0):
@@ -35,12 +37,14 @@ class ActionDistributionLogger(BaseCallback):
             if obs is not None:
                 obs_tensor,_=self.model.policy.obs_to_tensor(obs) #returns a tuple already
                 dist=self.model.policy.get_distribution(obs_tensor) #(distribution not-squashed: directly picking mean/std from policy)
-                mean_raw=dist.distribution.mean.detach().cpu().numpy().flatten()
-                std_raw=dist.distribution.stddev.detach().cpu().numpy().flatten()
-                clipped=np.clip(mean_raw, self.model.action_space.low, self.model.action_space.high)
-                print(f"[step {self.num_timesteps}] action (bias) unrefined (==raw): mean={mean_raw[0]:.3f} std={std_raw[0]:.3f} | dopo clip=[0.1,0.9]: {clipped[0]:.3f}")
-                self.logger.record("diagnostics/raw_action_mean", float(mean_raw[0]))
-                self.logger.record("diagnostics/raw_action_std", float(std_raw[0]))
+                mean_raw=dist.distribution.mean.detach().cpu().numpy().flatten()[0]
+                std_raw=dist.distribution.stddev.detach().cpu().numpy().flatten()[0]
+                clipped=np.clip(mean_raw, self.model.action_space.low[0], self.model.action_space.high[0])
+                #actual_bias=0.1+(0.9-0.1)*mean_raw
+                #print(f"[step {self.num_timesteps}] Mode Raw [0,1]: {mean_raw:.3f} -> Bias: {actual_bias:.3f}")
+                print(f"[step {self.num_timesteps}] Gaussian Raw Mean: {mean_raw:.3f} (Std: {std_raw:.3f}) -> Clipped Bias: {clipped:.3f}")
+                self.logger.record("diagnostics/gaussian_mean", float(mean_raw))
+                self.logger.record("diagnostics/gaussian_std", float(std_raw))
         return True
 
 def train_agent(total_tmstpd):
@@ -59,12 +63,18 @@ def train_agent(total_tmstpd):
     eval_env=Monitor(QKDEnv()) #evaluation environment, to be used in the EvalCallback, to evaluate the model during training
     
     #OLD version: before tpm (useful for names of old graphs)
-    #env=Monitor(env, 'C:/Users/rorag/VS_Cpp/thesis proj/logs/')  #wrap of the environment, to be passed to the model as a monitored object
+    #env=Monitor(env, 'local_path_lol')  #wrap of the environment, to be passed to the model as a monitored object
     env=Monitor(env, logs_dir)
-    model=PPO('MlpPolicy', env, verbose=1, learning_rate=0.0003, n_steps=2048, batch_size=64, ent_coef=0.05)
-    #learning_rate of PPO to see how fast the agent learns
-    #n_steps the number of steps to run for each environment before the agent updates the NN
-    #batch_size extent of the data pool to use for each update
+    model=PPO('MlpPolicy',
+              env, 
+              verbose=1, 
+              learning_rate=0.0003, #learning_rate of PPO to see how fast the agent learns
+              n_steps=1024, #n_steps the number of steps to run for each environment before the agent updates the NN
+              batch_size=256, #batch_size extent of the data pool to use for each update
+              ent_coef=0.01, #entropy shapes the exploration policy
+              policy_kwargs=dict(log_std_init=-0.5)) #the POLICY uses a distribution whose std=0.2 and not 1, otherwise explores gigantic intervals wrt what needed for our 0.8 amplitude [0.1-0.9]
+    with th.no_grad():
+        model.policy.action_net.bias.fill_(0.5) #last layer of the network explores centered in 0.5 (middle od the interval)
     action_logger=ActionDistributionLogger(check_freq=1000) #DIAGNOSTIC related (statistics for the ation distribution)
     #checkpoint_callback=CheckpointCallback(save_freq=5000, save_path='C:/Users/rorag/VS_Cpp/thesis proj/models/', name_prefix='ppo_qkd')
     #eval_callback=EvalCallback(eval_env=eval_env, best_model_save_path='C:/Users/rorag/VS_Cpp/thesis proj/logs/best_model/', log_path='C:/Users/rorag/VS_Cpp/thesis proj/logs/eval', eval_freq=5000, deterministic=True, render=False)

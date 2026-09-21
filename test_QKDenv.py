@@ -9,7 +9,8 @@ import os
 
 #OLD version before tpm: local
 base_dir=os.path.dirname(os.path.abspath(__file__))
-model_path=os.path.join(base_dir, "models_tpm", "ppo_qkd_tpm_final.zip")
+# model_path=os.path.join(base_dir, "models_tpm", "ppo_qkd_tpm_final.zip") #last checkpoint
+model_path=os.path.join(base_dir, "logs_tpm", "best_model", "best_model.zip")
 model=PPO.load(model_path)
 
 env=QKDEnv()
@@ -26,7 +27,7 @@ def test_agent(distances_test, n_sessions):
         for i in range(n_sessions):
             observation, info=env.reset(options={'distance': d})
             
-            for step_idx in range(20): #20 steps per session, then reset, since n_max steps=20 di là
+            for step_idx in range(env.max_steps): #20 steps per session, then reset, since n_max steps=20 di là
                 ti=time.time()
                 action=model.predict(observation, deterministic=True)[0] #determ=True to say NOT TO GO EXPLORING, just use agent's policy
                 next_observation, reward, terminated, truncated, info=env.step(action)
@@ -36,9 +37,10 @@ def test_agent(distances_test, n_sessions):
                     'distance': d,
                     'session': i, 
                     'step': step_idx,
+                    'raw_action': float(np.array(action).flat[0]),
                     'bias': env.engine.bias, #bias chosen by the agent
                     'reward': reward, #reward obtained from the session
-                    'qber': info['qber'], #qber obtained from the session
+                    'qber': info['raw_qber'], #qber obtained from the session
                     'gain': info['gain'], #gain obtained from the session
                     'key_length': info['key_length'], #sifted key length obtained from the session
                     'tpm_synced': info['tpm_synced'], #whether the TPMs were synchronized

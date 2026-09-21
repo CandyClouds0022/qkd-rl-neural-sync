@@ -27,10 +27,10 @@ from scipy.spatial import distance
 class QKDEnv(gym.Env):
     def __init__(self):
         self.max_steps=20 #NOTEForUser: max number of sessions before truncation MIGHT be chsnged later
-        self.tpm_A=tpm(K=3, N=4, L=6, M=3, B=2) #initialize the TPM for Alice
-        self.tpm_B=tpm(K=3, N=4, L=6, M=3, B=2) #initialize the TPM for Bob
+        self.tpm_A=tpm(K=3, N=4, L=3, M=3, B=1) #initialize the TPM for Alice
+        self.tpm_B=tpm(K=3, N=4, L=3, M=3, B=1) #initialize the TPM for Bob
         #Action space:
-        self.action_space=spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32) #cfr: np.random.rand() for the ia to comfortably pick a bias in the range 0.1-0.9
+        self.action_space=spaces.Box(low=0.1, high=0.9, shape=(1,), dtype=np.float32) #cfr: np.random.rand() for the ia to comfortably pick a bias in the range 0.1-0.9
         #Observation space:
         self.observation_space=spaces.Box(low=np.array([0.0,0.0,0.0], dtype=np.float32), high=np.array([1.0, 1.0, 1.0], dtype=np.float32), dtype=np.float32) #L=distance, qber=quantum bit error rate, gain=ratio of sifted key to initial bits NORMALIZED to be fed to the agent
         #physicial engine init from QKDAdvancedblabla
@@ -66,7 +66,7 @@ class QKDEnv(gym.Env):
 
     def step(self, action):
         self.current_step+=1 #saving this for later
-        bias=0.1+((0.9-0.1)*float(np.array(action).flat[0])) #circa bias=action[0], to get the bias from action
+        bias=float(np.clip(np.array(action).flat[0], 0.1, 0.9))
         self.engine.bias=bias #update the bias in the ACTUAL engine
         # running the physicsss
         A_bits, A_bases = self.engine.generate_Alice()
@@ -90,6 +90,8 @@ class QKDEnv(gym.Env):
                 leaked_fraction=1.0-(final_key_len/key_lenght_pre_privamp)
             else:
                 leaked_fraction=0.0
+        else:
+            A_final, B_final, final_key_len = np.array([]), np.array([]), 0
         # TPMs sync session core:
         bits_per_tpm_input=self.tpm_A.K*self.tpm_A.N*self.tpm_A.B
         tpm_steps=0
@@ -97,18 +99,26 @@ class QKDEnv(gym.Env):
         # using extracted key by A and B to feed TPMs: 
         while len(A_final)>=bits_per_tpm_input:
             current_bits_A=A_final[:bits_per_tpm_input]
-            current_bits_B=B_final[:bits_per_tpm_input]
+            #current_bits_B=B_final[:bits_per_tpm_input]
             A_final=A_final[bits_per_tpm_input:]
             B_final=B_final[bits_per_tpm_input:]
-            X_A=self.tpm_A.convert_bits_to_input(current_bits_A)
-            X_B=self.tpm_B.convert_bits_to_input(current_bits_B)
-            if X_A is None or X_B is None: #no input vector for TPMs
+            #X_A=self.tpm_A.convert_bits_to_input(current_bits_A)
+            #X_B=self.tpm_B.convert_bits_to_input(current_bits_B)
+            #if X_A is None or X_B is None: #no input vector for TPMs
+                #break
+            #tau_A=self.tpm_A.compute_output(X_A)
+            #tau_B=self.tpm_B.compute_output(X_B)
+            #if tau_A==tau_B:
+                #self.tpm_A.update_weights(X_A, tau_A, tau_B)
+                #self.tpm_B.update_weights(X_B, tau_B, tau_A)
+            X_shared=self.tpm_A.convert_bits_to_input(current_bits_A)  #derived from Alice, who's the public source
+            if X_shared is None:
                 break
-            tau_A=self.tpm_A.compute_output(X_A)
-            tau_B=self.tpm_B.compute_output(X_B)
+            tau_A=self.tpm_A.compute_output(X_shared)
+            tau_B=self.tpm_B.compute_output(X_shared)  #same input
             if tau_A==tau_B:
-                self.tpm_A.update_weights(X_A, tau_A, tau_B)
-                self.tpm_B.update_weights(X_B, tau_B, tau_A)
+                self.tpm_A.update_weights(X_shared, tau_A, tau_B)
+                self.tpm_B.update_weights(X_shared, tau_B, tau_A)
             tpm_steps+=1
             if np.array_equal(self.tpm_A.weights, self.tpm_B.weights):
                 sync_success=1
