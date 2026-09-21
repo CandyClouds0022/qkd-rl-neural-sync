@@ -14,7 +14,7 @@ model_path=os.path.join(base_dir, "logs_tpm", "best_model", "best_model.zip")
 model=PPO.load(model_path)
 
 env=QKDEnv()
-distances_test=np.linspace(0,150,16) #test su 16 distanze da 0 a 150 km
+distances_test=np.linspace(0,150,16) #test on 16 distances from 0 to 150 km
 n_sessions=100 #number of sessions simulated for each distance
 
 def test_agent(distances_test, n_sessions):

@@ -40,8 +40,6 @@ class ActionDistributionLogger(BaseCallback):
                 mean_raw=dist.distribution.mean.detach().cpu().numpy().flatten()[0]
                 std_raw=dist.distribution.stddev.detach().cpu().numpy().flatten()[0]
                 clipped=np.clip(mean_raw, self.model.action_space.low[0], self.model.action_space.high[0])
-                #actual_bias=0.1+(0.9-0.1)*mean_raw
-                #print(f"[step {self.num_timesteps}] Mode Raw [0,1]: {mean_raw:.3f} -> Bias: {actual_bias:.3f}")
                 print(f"[step {self.num_timesteps}] Gaussian Raw Mean: {mean_raw:.3f} (Std: {std_raw:.3f}) -> Clipped Bias: {clipped:.3f}")
                 self.logger.record("diagnostics/gaussian_mean", float(mean_raw))
                 self.logger.record("diagnostics/gaussian_std", float(std_raw))
